@@ -35,8 +35,8 @@ def CheckScraper_function(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(runstatus)
         # If scraper_status == 'Completed', update ScraperStatus in both tables
         if runstatus == 'RunStatus.COMPLETED':
-            update_query_scraper_results = text("UPDATE scraper_results_test SET scraper_status = 'Completed' WHERE request_id = :request_id")
-            update_query_change_tracking = text("UPDATE ScrapeStatusChangeTrackingTableTest SET ScraperStatus = 'Completed' WHERE RequestID = :request_id")
+            update_query_scraper_results = text("UPDATE scraper_results SET scraper_status = 'Completed' WHERE request_id = :request_id")
+            update_query_change_tracking = text("UPDATE ScrapeStatusChangeTrackingTable SET ScraperStatus = 'Completed' WHERE RequestID = :request_id")
 
             try:
                 with db_conn.connect() as conn:
