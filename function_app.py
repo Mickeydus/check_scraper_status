@@ -64,7 +64,7 @@ def GetScraperResults_function(request_id: str) -> str:
     scraper_status = scraper_api(request_type='status', request_id=request_id)
     website_url = json.loads(scraper_status['config'])['url']
 
-    case_version_id = get_case_version_id(request_id)
+    case_version_id = get_case_version_id()
 
     for page in scrape_results:
         page['text'] = requests.get(page['blob_url'], verify=verify_ssl).text
@@ -128,11 +128,11 @@ def trigger_pipeline(pipeline_name: str, scraper_id: str, case_version_id: str):
 
     # Create a JSON object containing the pipeline parameters
     pipeline_parameters = {
-    'parameters': {
         'scraper_id': scraper_id,
         'case_version_id': case_version_id
         }
-    }
+
+    pipeline_parameters = json.dumps(pipeline_parameters)
 
     # Headers for the pipeline run post request
     pipeline_run_headers = {
@@ -141,7 +141,7 @@ def trigger_pipeline(pipeline_name: str, scraper_id: str, case_version_id: str):
     }
 
     # Create a pipeline run
-    pipeline_run_response = requests.post(pipeline_run_url, headers=pipeline_run_headers, json=pipeline_parameters)
+    pipeline_run_response = requests.post(pipeline_run_url, headers=pipeline_run_headers, data=pipeline_parameters)
 
     if pipeline_run_response.status_code == 200:
         logging.info(f'Successfully started the pipeline: {pipeline_name}')
@@ -150,10 +150,10 @@ def trigger_pipeline(pipeline_name: str, scraper_id: str, case_version_id: str):
         logging.error(f'Failed to start the pipeline: {pipeline_name}. Response: {pipeline_run_response.content}')
         return f"Failed to start the pipeline. Response: {pipeline_run_response.content}"
 
-def get_case_version_id(request_id: str):
-    case_version_id_query = text("SELECT c.case_version_id FROM company_links c JOIN link_text l on c.scraper_id = l.scraper_id WHERE l.scraper_id = :request_id")
+def get_case_version_id():
+    case_version_id_query = text("SELECT c.case_version_id FROM company_links c JOIN link_text l on c.scraper_id = l.scraper_id")
     with db_conn.connect() as conn:
-        case_version_id_data = conn.execute(case_version_id_query.params(request_id=request_id)).fetchone() 
+        case_version_id_data = conn.execute(case_version_id_query).fetchone() 
 
     case_version_id = case_version_id_data[0]
     return case_version_id
