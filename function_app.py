@@ -44,8 +44,6 @@ def CheckScraper_function(req: func.HttpRequest) -> func.HttpResponse:
 
             GetScraperResults_function(request_id)
 
-    trigger_pipeline('dummypipeline')
-
     try:
     # ... rest of your function code ...
         return func.HttpResponse("Function executed successfully.", status_code=200)
@@ -66,6 +64,8 @@ def GetScraperResults_function(request_id: str) -> str:
     scraper_status = scraper_api(request_type='status', request_id=request_id)
     website_url = json.loads(scraper_status['config'])['url']
 
+    case_version_id = get_case_version_id(request_id)
+
     for page in scrape_results:
         page['text'] = requests.get(page['blob_url'], verify=verify_ssl).text
         # This will simply ignore characters that can't be printed
@@ -77,17 +77,19 @@ def GetScraperResults_function(request_id: str) -> str:
             "website_url": [website_url],
             "page_url": [page['url']],
             "text": [page['text']],
-           
+            "case_version_id": [case_version_id]
         }
-        #  "case_version_id": [case_version_id],
+        
         link_text_df = pd.DataFrame(link_text)
         with db_conn.connect() as conn:
             link_text_df.to_sql("link_text", conn, if_exists='append', index=False)
-
+    
+    trigger_pipeline('process_scraper_results_pipeline', request_id, case_version_id)
+    
     return scrape_results
 
 
-def trigger_pipeline(pipeline_name: str):
+def trigger_pipeline(pipeline_name: str, scraper_id: str, case_version_id: str):
     logging.info('Python function processed a request.')
     # Tenant ID, Client ID, and Client Secret can be saved in Azure Function App Settings
     tenant_id = "bf8ba62d-740b-46e9-a7da-cfe794c7da80"
@@ -127,9 +129,10 @@ def trigger_pipeline(pipeline_name: str):
     # Create a JSON object containing the pipeline parameters
     pipeline_parameters = {
     'parameters': {
-        'case_version_id': 'case_version_id'
+        'scraper_id': scraper_id,
+        'case_version_id': case_version_id
+        }
     }
-}
 
     # Headers for the pipeline run post request
     pipeline_run_headers = {
@@ -144,6 +147,13 @@ def trigger_pipeline(pipeline_name: str):
         logging.info(f'Successfully started the pipeline: {pipeline_name}')
         return "Successfully started the pipeline."
     else:
-        logging.info('jemoeder')
         logging.error(f'Failed to start the pipeline: {pipeline_name}. Response: {pipeline_run_response.content}')
         return f"Failed to start the pipeline. Response: {pipeline_run_response.content}"
+
+def get_case_version_id(request_id: str):
+    case_version_id_query = text("SELECT c.case_version_id FROM company_links c JOIN link_text l on c.scraper_id = l.scraper_id WHERE l.scraper_id = :request_id")
+    with db_conn.connect() as conn:
+        case_version_id_data = conn.execute(case_version_id_query.params(request_id=request_id)).fetchone() 
+
+    case_version_id = case_version_id_data[0]
+    return case_version_id
