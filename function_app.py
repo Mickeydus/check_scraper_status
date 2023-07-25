@@ -4,44 +4,59 @@ from utils.scrapertoolkit import connect_to_db, scraper_api, db_conn
 import pandas as pd
 import requests
 import logging
+from sqlalchemy import text
 import json
 
 verify_ssl = False
+app = func.FunctionApp()
 
-def main(mytimer: func.TimerRequest) -> None:
+#def main(mytimer: func.TimerRequest) -> None:
+@app.function_name(name="CheckScraper_function")
+@app.route(route="checkscraper", methods=['GET', 'POST'], auth_level='anonymous')
+def CheckScraper_function(req: func.HttpRequest) -> func.HttpResponse:
     # Connect to the database
     db_conn = connect_to_db()
 
     # Define the query to select rows where ScraperStatus == 'In Progress'
-    select_query = "SELECT RequestID FROM ChangeTrackingTable WHERE ScraperStatus = 'In Progress'"
+    select_query = text("SELECT RequestID FROM ScrapeStatusChangeTrackingTable WHERE ScraperStatus = 'In Progress'")
 
     # Execute the query
-    cursor = db_conn.cursor()
-    cursor.execute(select_query)
+    with db_conn.connect() as conn:
+        url_result_dict = conn.execute(select_query).fetchall() 
 
     # For each row where ScraperStatus == 'In Progress'
-    for row in cursor:
+    logging.info(len(url_result_dict))
+    for row in url_result_dict:
         request_id = row[0]
-
+        logging.info(request_id)
         # Call GetScraperStatus_function
         scraper_status = GetScraperStatus_function(request_id)
-        
+        runstatus = scraper_status['status']
+        logging.info(runstatus)
         # If scraper_status == 'Completed', update ScraperStatus in both tables
-        if scraper_status == 'RUNSTATUS.Completed':
-            update_query_scraper_results = f"UPDATE scraper_results SET ScraperStatus = 'Completed' WHERE RequestID = '{request_id}'"
-            update_query_change_tracking = f"UPDATE ChangeTrackingTable SET ScraperStatus = 'Completed' WHERE RequestID = '{request_id}'"
+        if runstatus == 'RunStatus.COMPLETED':
+            update_query_scraper_results = text("UPDATE scraper_results SET scraper_status = 'Completed' WHERE request_id = :request_id")
+            update_query_change_tracking = text("UPDATE ScrapeStatusChangeTrackingTable SET ScraperStatus = 'Completed' WHERE RequestID = :request_id")
 
-            cursor.execute(update_query_scraper_results)
-            cursor.execute(update_query_change_tracking)
+            with db_conn.connect() as conn:
+                scraper_results_update = conn.execute(update_query_scraper_results, {"request_id": request_id})
+                change_tracking_results = conn.execute(update_query_change_tracking, {"request_id": request_id})
+
             GetScraperResults_function(request_id)
 
-    db_conn.commit()
-    trigger_pipeline('org_class_pipeline')
+    trigger_pipeline('dummypipeline')
+
+    try:
+    # ... rest of your function code ...
+        return func.HttpResponse("Function executed successfully.", status_code=200)
+    except Exception as e:
+        return func.HttpResponse(f"Function execution failed: {str(e)}", status_code=500)
+
 
 def GetScraperStatus_function(request_id: str) -> str:
     scraper_status = scraper_api(request_type='status' ,request_id=request_id)
     # nested dictionary for config that is loaded as a string by default, so little transform
-    scraper_status['status'] = json.loads(scraper_status['status'])
+    scraper_status['config'] = json.loads(scraper_status['config'])
 
     return scraper_status
 
@@ -64,7 +79,7 @@ def GetScraperResults_function(request_id: str) -> str:
             "text": [page['text']],
            
         }
-        #  "case_version_id": [case_version_id],g
+        #  "case_version_id": [case_version_id],
         link_text_df = pd.DataFrame(link_text)
         with db_conn.connect() as conn:
             link_text_df.to_sql("link_text", conn, if_exists='append', index=False)
