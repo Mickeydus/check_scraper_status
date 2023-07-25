@@ -35,12 +35,18 @@ def CheckScraper_function(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(runstatus)
         # If scraper_status == 'Completed', update ScraperStatus in both tables
         if runstatus == 'RunStatus.COMPLETED':
-            update_query_scraper_results = text("UPDATE scraper_results SET scraper_status = 'Completed' WHERE request_id = :request_id")
-            update_query_change_tracking = text("UPDATE ScrapeStatusChangeTrackingTable SET ScraperStatus = 'Completed' WHERE RequestID = :request_id")
+            update_query_scraper_results = text("UPDATE scraper_results_test SET scraper_status = 'Completed' WHERE request_id = :request_id")
+            update_query_change_tracking = text("UPDATE ScrapeStatusChangeTrackingTableTest SET ScraperStatus = 'Completed' WHERE RequestID = :request_id")
 
-            with db_conn.connect() as conn:
-                scraper_results_update = conn.execute(update_query_scraper_results, {"request_id": request_id})
-                change_tracking_results = conn.execute(update_query_change_tracking, {"request_id": request_id})
+            try:
+                with db_conn.connect() as conn:
+                    scraper_results_update = conn.execute(update_query_scraper_results, {"request_id": request_id})
+                    change_tracking_results = conn.execute(update_query_change_tracking, {"request_id": request_id})
+                    logging.info(scraper_results_update.rowcount)
+                    logging.info(change_tracking_results.rowcount)
+                    conn.commit()
+            except Exception as e:
+                print(f"Error updating the tables: {e}")
 
             GetScraperResults_function(request_id)
 
