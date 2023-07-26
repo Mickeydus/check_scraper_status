@@ -35,8 +35,8 @@ def CheckScraper_function(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(runstatus)
         # If scraper_status == 'Completed', update ScraperStatus in both tables
         if runstatus == 'RunStatus.COMPLETED':
-            update_query_scraper_results = text("UPDATE scraper_results SET scraper_status = 'Completed' WHERE request_id = :request_id")
-            update_query_change_tracking = text("UPDATE ScrapeStatusChangeTrackingTable SET ScraperStatus = 'Completed' WHERE RequestID = :request_id")
+            update_query_scraper_results = text("UPDATE scraper_results SET scraper_status_test = 'Completed' WHERE request_id = :request_id")
+            update_query_change_tracking = text("UPDATE ScrapeStatusChangeTrackingTable_Test SET ScraperStatus = 'Completed' WHERE RequestID = :request_id")
 
             try:
                 with db_conn.connect() as conn:
@@ -70,9 +70,11 @@ def GetScraperResults_function(request_id: str) -> str:
     scraper_status = scraper_api(request_type='status', request_id=request_id)
     website_url = json.loads(scraper_status['config'])['url']
 
-    case_version_id = get_case_version_id()
-
+    case_version_id = get_case_version_id(request_id)
+    if not case_version_id:
+        raise ValueError("case_version_id cannot be empty!");
     for page in scrape_results:
+        logging.info('page')
         page['text'] = requests.get(page['blob_url'], verify=verify_ssl).text
         # This will simply ignore characters that can't be printed
         page['text'] = ''.join(i for i in page['text'] if ord(i) < 128)
@@ -88,6 +90,7 @@ def GetScraperResults_function(request_id: str) -> str:
         
         link_text_df = pd.DataFrame(link_text)
         with db_conn.connect() as conn:
+            logging.info(link_text_df.head())
             link_text_df.to_sql("link_text", conn, if_exists='append', index=False)
     
     trigger_pipeline('process_scraper_results_pipeline', request_id, case_version_id)
@@ -156,10 +159,13 @@ def trigger_pipeline(pipeline_name: str, scraper_id: str, case_version_id: str):
         logging.error(f'Failed to start the pipeline: {pipeline_name}. Response: {pipeline_run_response.content}')
         return f"Failed to start the pipeline. Response: {pipeline_run_response.content}"
 
-def get_case_version_id():
-    case_version_id_query = text("SELECT c.case_version_id FROM company_links c JOIN link_text l on c.scraper_id = l.scraper_id")
+def get_case_version_id(request_id: str):
+    logging.info("request_id: %s", request_id)
+                 
+    case_version_id_query = text("SELECT case_version_id FROM scraper_results WHERE request_id = :request_id")
     with db_conn.connect() as conn:
-        case_version_id_data = conn.execute(case_version_id_query).fetchone() 
+        case_version_id_data = conn.execute(case_version_id_query.params(request_id=request_id)).fetchone() 
 
     case_version_id = case_version_id_data[0]
+    logging.info("case_version_id: %s", case_version_id)
     return case_version_id
